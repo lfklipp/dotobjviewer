@@ -1,60 +1,77 @@
 use anyhow::Result;
-use tracing::{info, error};
+use tracing::{error, info};
 use winit::{
     event::{Event, WindowEvent},
-    event_loop::EventLoopWindowTarget,
-    window::Window,
-    keyboard::{Key, ModifiersState},
+    event_loop::EventLoop,
+    window::{Window, WindowBuilder},
 };
+use std::rc::Rc;
+use std::cell::RefCell;
 
-use crate::menu::Menu;
 use crate::renderer::Renderer;
+use crate::menu::Menu;
 
 pub struct App {
-    menu: Menu,
-    modifiers: ModifiersState,
     renderer: Option<Renderer>,
+    menu: Menu,
+    modifiers: winit::keyboard::ModifiersState,
 }
 
 impl App {
     pub fn new() -> Result<Self> {
-        let menu = Menu::new()?;
         Ok(Self {
-            menu,
-            modifiers: ModifiersState::default(),
             renderer: None,
+            menu: Menu::new()?,
+            modifiers: winit::keyboard::ModifiersState::default(),
         })
     }
 
-    pub async fn init_renderer(&mut self, window: &Window) -> Result<()> {
+    pub fn run(mut self) -> Result<()> {
+        let event_loop = EventLoop::new()?;
+        let window = Rc::new(WindowBuilder::new()
+            .with_title("DotObjViewer")
+            .with_inner_size(winit::dpi::LogicalSize::new(1024.0, 768.0))
+            .with_resizable(true)
+            .build(&event_loop)?);
+
+        // Initialize renderer
         info!("Initializing renderer...");
-        let renderer = Renderer::new(window).await?;
-        self.renderer = Some(renderer);
+        self.renderer = Some(pollster::block_on(Renderer::new(&window))?);
+
+        let window_clone = window.clone();
+        let mut app = self;
+        event_loop.run(move |event, elwt| {
+            if let Err(e) = app.handle_event(event, elwt, &window_clone) {
+                error!("Error handling event: {}", e);
+            }
+        })?;
+
         Ok(())
     }
 
-    pub fn handle_event(
+    fn handle_event(
         &mut self,
         event: Event<()>,
-        elwt: &EventLoopWindowTarget<()>,
+        elwt: &winit::event_loop::EventLoopWindowTarget<()>,
         window: &Window,
     ) -> Result<()> {
         match event {
-            Event::WindowEvent { event, .. } => {
+            Event::WindowEvent {
+                ref event,
+                window_id,
+            } if window_id == window.id() => {
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.handle_input(event);
+                }
+
                 match event {
                     WindowEvent::CloseRequested => {
                         info!("Window close requested");
                         elwt.exit();
                     }
-                    WindowEvent::KeyboardInput { event, .. } => {
-                        self.handle_keyboard_input(event)?;
-                    }
-                    WindowEvent::ModifiersChanged(modifiers) => {
-                        self.modifiers = modifiers.state();
-                    }
                     WindowEvent::Resized(physical_size) => {
                         if let Some(renderer) = &mut self.renderer {
-                            renderer.resize(physical_size);
+                            renderer.resize(*physical_size);
                         }
                     }
                     WindowEvent::RedrawRequested => {
@@ -62,82 +79,56 @@ impl App {
                             match renderer.render(window) {
                                 Ok(_) => {}
                                 Err(wgpu::SurfaceError::Lost) => {
-                                    if let Some(renderer) = &mut self.renderer {
-                                        renderer.resize(window.inner_size());
-                                    }
+                                    renderer.resize(window.inner_size());
                                 }
                                 Err(wgpu::SurfaceError::OutOfMemory) => {
                                     elwt.exit();
                                 }
                                 Err(e) => {
-                                    eprintln!("{:?}", e);
+                                    error!("Render error: {:?}", e);
                                 }
                             }
                         }
                         window.request_redraw();
                     }
+                    WindowEvent::KeyboardInput { event, .. } => {
+                        if event.state == winit::event::ElementState::Pressed {
+                            match event.logical_key.as_ref() {
+                                winit::keyboard::Key::Character("o") | winit::keyboard::Key::Character("O") => {
+                                    // Check for Ctrl modifier - we'll need to track this separately
+                                    if let Ok(Some(path)) = self.menu.open_file() {
+                                        if let Some(renderer) = &mut self.renderer {
+                                            if let Err(e) = renderer.load_mesh(&path) {
+                                                error!("Failed to load mesh: {}", e);
+                                            } else {
+                                                info!("Successfully loaded OBJ file: {:?}", path);
+                                            }
+                                        }
+                                    }
+                                }
+                                winit::keyboard::Key::Character("q") | winit::keyboard::Key::Character("Q") => {
+                                    info!("Window close requested");
+                                    elwt.exit();
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
-            Event::DeviceEvent { .. } => {}
-            Event::UserEvent(_) => {}
-            Event::Suspended => {
-                info!("Application suspended");
-            }
-            Event::Resumed => {
-                info!("Application resumed");
+            Event::DeviceEvent {
+                event: winit::event::DeviceEvent::MouseMotion { .. },
+                ..
+            } => {
+                window.request_redraw();
             }
             Event::AboutToWait => {
                 window.request_redraw();
             }
-            Event::LoopExiting => {
-                info!("Event loop exiting");
-            }
             _ => {}
         }
-        Ok(())
-    }
 
-    fn handle_keyboard_input(&mut self, event: winit::event::KeyEvent) -> Result<()> {
-        if event.state == winit::event::ElementState::Pressed {
-            match event.logical_key {
-                Key::Character(ref c) if c == "o" || c == "O" => {
-                    if self.modifiers.control_key() {
-                        self.load_obj_file()?;
-                    }
-                }
-                Key::Character(ref c) if c == "q" || c == "Q" => {
-                    if self.modifiers.control_key() {
-                        info!("Quit requested via Ctrl+Q");
-                    }
-                }
-                _ => {}
-            }
-        }
-        Ok(())
-    }
-
-    fn load_obj_file(&mut self) -> Result<()> {
-        if let Some(renderer) = &mut self.renderer {
-            if let Some(path) = self.menu.open_file()? {
-                match renderer.load_mesh(&path) {
-                    Ok(_) => {
-                        info!("Successfully loaded OBJ file: {:?}", path);
-                        let _ = self.menu.show_info(
-                            "File Loaded", 
-                            &format!("Successfully loaded: {}", path.display())
-                        );
-                    }
-                    Err(e) => {
-                        error!("Failed to load OBJ file: {}", e);
-                        let _ = self.menu.show_error(
-                            "Load Error", 
-                            &format!("Failed to load file: {}", e)
-                        );
-                    }
-                }
-            }
-        }
         Ok(())
     }
 } 

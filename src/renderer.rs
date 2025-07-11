@@ -5,8 +5,16 @@ use wgpu::{
 };
 use wgpu::util::DeviceExt;
 use winit::window::Window;
+use glam::Mat4;
 
 use crate::mesh::{Mesh, Vertex};
+use crate::camera::Camera;
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct CameraUniforms {
+    view_projection: [[f32; 4]; 4],
+}
 
 pub struct Renderer {
     instance: Instance,
@@ -18,6 +26,9 @@ pub struct Renderer {
     mesh: Mesh,
     has_mesh: bool,
     default_vertex_buffer: wgpu::Buffer,
+    camera: Camera,
+    camera_uniform_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
 }
 
 impl Renderer {
@@ -69,6 +80,45 @@ impl Renderer {
         };
         surface.configure(&device, &config);
 
+        // Create camera
+        let camera = Camera::new(size.width as f32 / size.height as f32);
+
+        // Create camera uniform buffer
+        let camera_uniforms = CameraUniforms {
+            view_projection: (camera.projection_matrix() * camera.view_matrix()).to_cols_array_2d(),
+        };
+
+        let camera_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Camera Uniform Buffer"),
+            contents: bytemuck::cast_slice(&[camera_uniforms]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Create bind group layout
+        let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Camera Bind Group Layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+
+        // Create bind group
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Camera Bind Group"),
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_uniform_buffer.as_entire_binding(),
+            }],
+        });
+
         // Create shader
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
@@ -79,7 +129,7 @@ impl Renderer {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[],
+                bind_group_layouts: &[&camera_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -153,6 +203,9 @@ impl Renderer {
             mesh,
             has_mesh: false,
             default_vertex_buffer,
+            camera,
+            camera_uniform_buffer,
+            camera_bind_group,
         })
     }
 
@@ -161,8 +214,27 @@ impl Renderer {
         self.mesh.load_from_obj(path)?;
         self.mesh.create_buffers(&self.device);
         self.has_mesh = true;
+        
+        // Auto-fit camera to the loaded model
+        if !self.mesh.vertices.is_empty() {
+            let mut min_pos = glam::Vec3::splat(f32::INFINITY);
+            let mut max_pos = glam::Vec3::splat(f32::NEG_INFINITY);
+            
+            for vertex in &self.mesh.vertices {
+                let pos = glam::Vec3::from_slice(&vertex.position);
+                min_pos = min_pos.min(pos);
+                max_pos = max_pos.max(pos);
+            }
+            
+            self.camera.auto_fit_to_model((min_pos, max_pos));
+        }
+        
         info!("Mesh loaded successfully");
         Ok(())
+    }
+
+    pub fn handle_input(&mut self, event: &winit::event::WindowEvent) {
+        self.camera.handle_input(event);
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -170,10 +242,17 @@ impl Renderer {
             self.size = new_size;
             self.config.width = new_size.width;
             self.config.height = new_size.height;
+            self.camera.aspect_ratio = new_size.width as f32 / new_size.height as f32;
         }
     }
 
     pub fn render(&mut self, window: &Window) -> Result<(), wgpu::SurfaceError> {
+        // Update camera uniforms
+        let camera_uniforms = CameraUniforms {
+            view_projection: (self.camera.projection_matrix() * self.camera.view_matrix()).to_cols_array_2d(),
+        };
+        self.queue.write_buffer(&self.camera_uniform_buffer, 0, bytemuck::cast_slice(&[camera_uniforms]));
+
         // Create surface for this frame using the stored instance
         let surface = self.instance.create_surface(window).map_err(|_| wgpu::SurfaceError::Lost)?;
         surface.configure(&self.device, &self.config);
@@ -211,6 +290,7 @@ impl Renderer {
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
 
             if self.has_mesh {
                 // Render loaded mesh
