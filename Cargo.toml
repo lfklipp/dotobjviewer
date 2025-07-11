@@ -1,6 +1,25 @@
 [package]
 name = "dotobjviewer"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+winit = "0.29"
+native-dialog = "0.7"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# 3D Graphics
+wgpu = "0.19"
+pollster = "0.3"
+bytemuck = { version = "1.14", features = ["derive"] }
+
+# Math utilities
+glam = "0.25"
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# OBJ file parsing
+tobj = "4.0"
