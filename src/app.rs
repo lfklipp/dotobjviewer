@@ -34,7 +34,7 @@ impl App {
             .with_resizable(true)
             .build(&event_loop)?);
 
-        // Initialize renderer
+       
         info!("Initializing renderer...");
         self.renderer = Some(pollster::block_on(Renderer::new(&window))?);
 

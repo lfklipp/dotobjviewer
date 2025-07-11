@@ -65,7 +65,6 @@ impl Mesh {
         for model in &models {
             let mesh = &model.mesh;
             
-            // Process vertices
             for i in 0..mesh.positions.len() / 3 {
                 let pos = [
                     mesh.positions[i * 3],
@@ -73,8 +72,7 @@ impl Mesh {
                     mesh.positions[i * 3 + 2],
                 ];
                 
-                // Use a simple color based on position for now
-                let color = [0.8, 0.8, 0.8]; // Default gray color
+                let color = [0.8, 0.8, 0.8]; 
                 
                 self.vertices.push(Vertex {
                     position: pos,
@@ -82,11 +80,11 @@ impl Mesh {
                 });
             }
 
-            // Process indices
+           
             if !mesh.indices.is_empty() {
                 self.indices.extend(mesh.indices.iter().map(|&i| i as u32));
             } else {
-                // If no indices, create them from vertex order
+                
                 for i in (0..self.vertices.len()).step_by(3) {
                     if i + 2 < self.vertices.len() {
                         self.indices.push(i as u32);

@@ -80,10 +80,10 @@ impl Renderer {
         };
         surface.configure(&device, &config);
 
-        // Create camera
+        
         let camera = Camera::new(size.width as f32 / size.height as f32);
 
-        // Create camera uniform buffer
+        
         let camera_uniforms = CameraUniforms {
             view_projection: (camera.projection_matrix() * camera.view_matrix()).to_cols_array_2d(),
         };
@@ -94,7 +94,7 @@ impl Renderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // Create bind group layout
+        
         let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Camera Bind Group Layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -109,7 +109,7 @@ impl Renderer {
             }],
         });
 
-        // Create bind group
+        
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Camera Bind Group"),
             layout: &camera_bind_group_layout,
@@ -119,13 +119,13 @@ impl Renderer {
             }],
         });
 
-        // Create shader
+        
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/triangle.wgsl").into()),
         });
 
-        // Create render pipeline
+        
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
@@ -168,7 +168,7 @@ impl Renderer {
             multiview: None,
         });
 
-        // Create default triangle vertex buffer
+        
         let vertices = &[
             Vertex {
                 position: [0.0, 0.5, 0.0],
@@ -215,7 +215,7 @@ impl Renderer {
         self.mesh.create_buffers(&self.device);
         self.has_mesh = true;
         
-        // Auto-fit camera to the loaded model
+        
         if !self.mesh.vertices.is_empty() {
             let mut min_pos = glam::Vec3::splat(f32::INFINITY);
             let mut max_pos = glam::Vec3::splat(f32::NEG_INFINITY);
@@ -247,13 +247,13 @@ impl Renderer {
     }
 
     pub fn render(&mut self, window: &Window) -> Result<(), wgpu::SurfaceError> {
-        // Update camera uniforms
+        
         let camera_uniforms = CameraUniforms {
             view_projection: (self.camera.projection_matrix() * self.camera.view_matrix()).to_cols_array_2d(),
         };
         self.queue.write_buffer(&self.camera_uniform_buffer, 0, bytemuck::cast_slice(&[camera_uniforms]));
 
-        // Create surface for this frame using the stored instance
+        
         let surface = self.instance.create_surface(window).map_err(|_| wgpu::SurfaceError::Lost)?;
         surface.configure(&self.device, &self.config);
         
@@ -293,7 +293,7 @@ impl Renderer {
             render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
 
             if self.has_mesh {
-                // Render loaded mesh
+                
                 if let Some(vertex_buffer) = self.mesh.get_vertex_buffer() {
                     render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                     
@@ -305,7 +305,7 @@ impl Renderer {
                     }
                 }
             } else {
-                // Render default triangle
+                
                 render_pass.set_vertex_buffer(0, self.default_vertex_buffer.slice(..));
                 render_pass.draw(0..3, 0..1);
             }
