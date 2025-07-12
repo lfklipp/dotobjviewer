@@ -6,7 +6,7 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 use std::rc::Rc;
-use std::cell::RefCell;
+use std::time::{Duration, Instant};
 
 use crate::renderer::Renderer;
 use crate::menu::Menu;
@@ -14,7 +14,9 @@ use crate::menu::Menu;
 pub struct App {
     renderer: Option<Renderer>,
     menu: Menu,
-    modifiers: winit::keyboard::ModifiersState,
+    last_stats_display: Instant,
+    stats_display_interval: Duration,
+    show_detailed_stats: bool,
 }
 
 impl App {
@@ -22,7 +24,9 @@ impl App {
         Ok(Self {
             renderer: None,
             menu: Menu::new()?,
-            modifiers: winit::keyboard::ModifiersState::default(),
+            last_stats_display: Instant::now(),
+            stats_display_interval: Duration::from_secs(2), // Show stats every 2 seconds
+            show_detailed_stats: false,
         })
     }
 
@@ -61,6 +65,8 @@ impl App {
                 window_id,
             } if window_id == window.id() => {
                 if let Some(renderer) = &mut self.renderer {
+                    // Pass event to egui
+                    let _ = renderer.egui_winit_state.on_window_event(window, event);
                     renderer.handle_input(event);
                 }
 
@@ -77,7 +83,27 @@ impl App {
                     WindowEvent::RedrawRequested => {
                         if let Some(renderer) = &mut self.renderer {
                             match renderer.render(window) {
-                                Ok(_) => {}
+                                Ok(_) => {
+                                    // Display performance stats periodically
+                                    let now = Instant::now();
+                                    if now.duration_since(self.last_stats_display) >= self.stats_display_interval {
+                                        let stats = renderer.get_performance_stats();
+                                        if self.show_detailed_stats {
+                                            info!("Performance Stats - CPU: {:.1}%, RAM: {:.1}% ({:.0}MB/{:.0}MB), FPS: {:.1}, Frame: {:.1}ms, Frames: {}", 
+                                                stats.cpu_usage, 
+                                                stats.memory_usage, 
+                                                stats.memory_used_mb, 
+                                                stats.memory_total_mb,
+                                                stats.fps,
+                                                stats.frame_time_ms,
+                                                stats.frame_count);
+                                        } else {
+                                            info!("FPS: {:.1}, CPU: {:.1}%, RAM: {:.1}%", 
+                                                stats.fps, stats.cpu_usage, stats.memory_usage);
+                                        }
+                                        self.last_stats_display = now;
+                                    }
+                                }
                                 Err(wgpu::SurfaceError::Lost) => {
                                     renderer.resize(window.inner_size());
                                 }
@@ -105,6 +131,15 @@ impl App {
                                             }
                                         }
                                     }
+                                }
+                                winit::keyboard::Key::Character("w") | winit::keyboard::Key::Character("W") => {
+                                    if let Some(renderer) = &mut self.renderer {
+                                        renderer.toggle_wireframe();
+                                    }
+                                }
+                                winit::keyboard::Key::Character("p") | winit::keyboard::Key::Character("P") => {
+                                    self.show_detailed_stats = !self.show_detailed_stats;
+                                    info!("Detailed performance stats: {}", self.show_detailed_stats);
                                 }
                                 winit::keyboard::Key::Character("q") | winit::keyboard::Key::Character("Q") => {
                                     info!("Window close requested");

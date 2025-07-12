@@ -1,11 +1,7 @@
 use anyhow::Result;
-use tracing::{info, error};
-use winit::{
-    event_loop::EventLoop,
-    window::WindowBuilder,
-};
-use std::rc::Rc;
-use std::cell::RefCell;
+use tracing::info;
+
+use crate::app::App;
 
 mod app;
 mod camera;
@@ -13,15 +9,15 @@ mod menu;
 mod mesh;
 mod renderer;
 mod shaders;
-
-use app::App;
+mod performance;
+// mod overlay;
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
-    tracing::info!("Starting DotObjViewer...");
-
+    info!("Starting DotObjViewer...");
+    
     let app = App::new()?;
     app.run()?;
-
+    
     Ok(())
 }
